@@ -1,10 +1,12 @@
 import requests
 import pickle
 import datetime
+from collections import OrderedDict
 import os
 from bokeh.io import curdoc
 from bokeh.plotting import figure, output_file, show
 from bokeh.palettes import Category20
+import time
 
 tier_points = {
     "IRON": 0,
@@ -25,6 +27,8 @@ ranks_tags = {
     800: "Silver",
     1200: "Gold"
 }
+
+max_dates_to_graph = 10
 
 api_token = ""
 summoner_names: dict = {
@@ -56,12 +60,17 @@ def load_obj(name):
         return pickle.load(f)
 
 
-def get_leader_board():
+def get_new_scores():
     summoner_names_total_score = dict()
     for key in summoner_names:
         print("Getting: " + key + " score")
         ranked_response = requests.get("https://na1.api.riotgames.com/lol/league/v4/entries/by-summoner/{id}"
                                        .format(id=summoner_names[key]), headers=requests_headers)
+
+
+        if ranked_response.status_code == 403:
+            print("Need new API key.....")
+            return
 
         ranked_response_json = ranked_response.json()
         summoner_total_score = calculate_rank_score(ranked_response_json[0]["leaguePoints"],
@@ -71,16 +80,15 @@ def get_leader_board():
 
     print(summoner_names_total_score)
     save_obj(summoner_names_total_score, "summoner_names_total_score-" + str(datetime.date.today()))
-    plot_ranks()
 
 
 def load_rank_and_time():
-    total_scores = dict()
+    total_scores = OrderedDict()
     for file_name in os.listdir("summoner_scores"):
         print(file_name)
         lp_date = file_name[file_name.find("-") + 1: file_name.find(".")]
         print(lp_date)
-        summoner_scores: dict = load_obj(file_name)
+        summoner_scores: dict = OrderedDict(load_obj(file_name))
         total_scores[lp_date] = summoner_scores
 
     for date in total_scores.keys():
@@ -89,15 +97,23 @@ def load_rank_and_time():
     return total_scores
 
 
-def plot_history_graph(rank_history: dict):
+def plot_history_graph(rank_history: OrderedDict):
+    curdoc().theme = 'dark_minimal'
     print(rank_history)
     summoner_points: list = list()
+    dates_to_graph = (len(rank_history) - 1) - max_dates_to_graph
+
+    count = 0
     for date in rank_history.keys():
         summoner_league_points: dict = rank_history.get(date)
-        summoner_points.append(list(summoner_league_points.values()))
-    xs = list(rank_history.keys())
+        if count > dates_to_graph:
+            summoner_points.append(list(summoner_league_points.values()))
+        count += 1
+
+    xs = list(rank_history.keys())[dates_to_graph: -1]
+    print("XS length: %i", len(xs))
     print("summoner " + str(len(summoner_points)))
-    graph = figure(title="History of LP", x_range=xs, width=1000, height=700)
+    graph = figure(title="History of LP", x_range=xs, width=1000, height=700, y_range=(300, 1200))
     one_user = list()
     first_date = list(rank_history.keys())[0]
     summoner_names: list = list(rank_history.get(first_date).keys())
@@ -115,6 +131,7 @@ def plot_history_graph(rank_history: dict):
                    legend_label=summoner_names[x], color=Category20[len(summoner_names)][x])
         i += 1
     graph.add_layout(graph.legend[0], 'right')
+    graph.yaxis.major_label_overrides = {400: "BZ4", 600: "BZ2", 800: "SLV4", 1000: "SLV2", 1200: "GLD4"}
     show(graph)
 
 
@@ -125,20 +142,6 @@ def repeat_dates_list(dates_list: list):
     print("Repeated Date List" + str(date_list_of_list))
 
 
-def plot_ranks():
-    graph_name = "The Family Ranked Leader Board - " + str(datetime.date.today())
-    summoner_names_total_score: dict = load_obj("summoner_names_total_score-" + str(datetime.date.today()))
-    summoner_names_total_score = dict(sorted(summoner_names_total_score.items(), key=lambda item: item[1]))
-    print(type(summoner_names_total_score.keys()))
-    plot = figure(x_range=list(summoner_names_total_score.keys()),
-                  plot_width=1200, plot_height=800, x_axis_label="Summoner Name",
-                  y_axis_label="Total LP", title=graph_name)
-    curdoc().theme = 'dark_minimal'
-
-    plot.circle_dot(list(summoner_names_total_score.keys()),
-                    list(summoner_names_total_score.values()),
-                    size=20, color="#ff9bff", hatch_color="#DDA0DD")
-    show(plot)
 
 
 def calculate_rank_score(league_points: int, tier: str, rank: str):
@@ -150,5 +153,6 @@ def calculate_rank_score(league_points: int, tier: str, rank: str):
 
 
 if __name__ == '__main__':
-    # get_leader_board()
+    get_new_scores()
+    time.sleep(2)
     plot_history_graph(load_rank_and_time())
